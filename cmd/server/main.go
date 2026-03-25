@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/ScholarlyKiwi/learn-pub-sub-starter/internal/pubsub"
+	"github.com/ScholarlyKiwi/learn-pub-sub-starter/internal/routing"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -19,6 +21,12 @@ func main() {
 	defer connection.Close()
 
 	fmt.Println("Peril Server successfully start!")
+
+	perilChan, err := connection.Channel()
+
+	err = pubsub.PublishJSON(perilChan, routing.ExchangePerilDirect, routing.PauseKey, routing.PlayingState{
+		IsPaused: true,
+	})
 
 	// wait for ctrl+c
 	signalChan := make(chan os.Signal, 1)
