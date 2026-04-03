@@ -2,26 +2,38 @@ package main
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/ScholarlyKiwi/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/ScholarlyKiwi/learn-pub-sub-starter/internal/pubsub"
+	"github.com/ScholarlyKiwi/learn-pub-sub-starter/internal/routing"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-func handlerMove(gs *gamelogic.GameState) func(gamelogic.ArmyMove) pubsub.AckType {
+func handlerMove(gs *gamelogic.GameState, ch *amqp.Channel) func(gamelogic.ArmyMove) pubsub.AckType {
 	return func(mv gamelogic.ArmyMove) pubsub.AckType {
 		defer fmt.Print("> ")
 		outcome := gs.HandleMove(mv)
 		switch outcome {
 		case gamelogic.MoveOutComeSafe:
-		case gamelogic.MoveOutcomeMakeWar:
-			log.Printf("Move successful: %v\n", outcome)
 			return pubsub.AckType_Ack
+
+		case gamelogic.MoveOutcomeMakeWar:
+			war_routing_key := fmt.Sprintf("%v.%v", routing.WarRecognitionsPrefix, gs.GetUsername())
+			err := pubsub.PublishJSON(ch, routing.ExchangePerilTopic, war_routing_key, gamelogic.RecognitionOfWar{
+				Attacker: mv.Player,
+				Defender: gs.GetPlayerSnap(),
+			})
+
+			if err != nil {
+				fmt.Printf("Error publishing war recognition: %v\n", err)
+				return pubsub.AckType_Nack_Requeue
+			}
+			return pubsub.AckType_Ack
+
 		case gamelogic.MoveOutcomeSamePlayer:
-			log.Printf("Unable to move, same player: %v\n,", outcome)
-			return pubsub.AckType_Nack_Discard
+			return pubsub.AckType_Ack
 		}
-		log.Printf("Unknown move outcome: %v\n", outcome)
+		fmt.Printf("Unknown move outcome: %v\n", outcome)
 		return pubsub.AckType_Nack_Discard
 	}
 }

@@ -27,25 +27,48 @@ func main() {
 		log.Fatalf("could not get username: %v", err)
 	}
 
+	channel, err := connection.Channel()
+	if err != nil {
+		log.Fatalf("could not create channel: %v", err)
+	}
+	defer channel.Close()
+
 	perilState := gamelogic.NewGameState(username)
 
 	pause_queue := fmt.Sprintf("%v.%v", routing.PauseKey, username)
-	err = pubsub.SubscribeJSON(connection, routing.ExchangePerilDirect, pause_queue, routing.PauseKey, pubsub.QueueType_Transient, handlerPause(perilState))
+	err = pubsub.SubscribeJSON(connection,
+		routing.ExchangePerilDirect,
+		pause_queue,
+		routing.PauseKey,
+		pubsub.QueueType_Transient,
+		handlerPause(perilState))
 	if err != nil {
 		log.Fatalf("could not subscribe to pause: %v", err)
 	}
 
 	armyMove_queue := fmt.Sprintf("%v.%v", routing.ArmyMovesPrefix, username)
 	armyMove_key := fmt.Sprintf("%v.*", routing.ArmyMovesPrefix)
-	err = pubsub.SubscribeJSON(connection, routing.ExchangePerilTopic, armyMove_queue, armyMove_key, pubsub.QueueType_Transient, handlerMove(perilState))
+	err = pubsub.SubscribeJSON(connection,
+		routing.ExchangePerilTopic,
+		armyMove_queue,
+		armyMove_key,
+		pubsub.QueueType_Transient,
+		handlerMove(perilState, channel))
 	if err != nil {
 		log.Fatalf("could not subscribe to army moves: %v", err)
 	}
-	channel, err := connection.Channel()
+
+	war_queue := routing.WarRecognitionsPrefix
+	war_routing_key := routing.WarRecognitionsPrefix + ".*"
+	err = pubsub.SubscribeJSON(connection,
+		routing.ExchangePerilTopic,
+		war_queue,
+		war_routing_key,
+		pubsub.QueueType_Durable,
+		handlerWar(perilState))
 	if err != nil {
-		log.Fatalf("could not create channel: %v", err)
+		log.Fatalf("could not subscribe to war: %v", err)
 	}
-	defer channel.Close()
 
 	for {
 
@@ -62,7 +85,7 @@ func main() {
 				moveResponse, err := perilState.CommandMove(commands)
 				err = pubsub.PublishJSON(channel, routing.ExchangePerilTopic, armyMove_queue, moveResponse)
 				if err != nil {
-					log.Println("move published")
+					fmt.Printf("move failed to publish: %v\n", err)
 				}
 				fmt.Println(moveResponse)
 				if err != nil {
