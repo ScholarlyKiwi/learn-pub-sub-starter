@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/ScholarlyKiwi/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/ScholarlyKiwi/learn-pub-sub-starter/internal/pubsub"
@@ -15,17 +16,29 @@ func main() {
 	const connectString = "amqp://guest:guest@localhost:5672/"
 	connection, err := amqp.Dial(connectString)
 	if err != nil {
-		fmt.Printf("Error opening connection: %v\n", err)
+		log.Fatalf("Error opening connection: %v\n", err)
 	}
 	defer connection.Close()
 
 	fmt.Println("Peril Server successfully started!")
 
+	_, queue, err := pubsub.DeclareAndBind(
+		connection,
+		routing.ExchangePerilTopic,
+		routing.GameLogSlug,
+		routing.GameLogSlug+".*",
+		pubsub.QueueType_Durable,
+	)
+	if err != nil {
+		log.Fatalf("could not subscribe to pause: %v", err)
+	}
+	fmt.Printf("Queue %v declared and bound!\n", queue.Name)
+
 	gamelogic.PrintServerHelp()
 
 	perilChan, err := connection.Channel()
 	if err != nil {
-		fmt.Printf("Error pausing: %v\n", err)
+		log.Fatalf("Error pausing: %v\n", err)
 		return
 	}
 	defer perilChan.Close()
@@ -37,12 +50,15 @@ commandLoop:
 			command := commands[0]
 			switch command {
 			case "pause":
-				fmt.Println("Sending pause message")
-				err = pubsub.PublishJSON(perilChan, routing.ExchangePerilDirect, routing.PauseKey, routing.PlayingState{
-					IsPaused: true,
-				})
+				fmt.Println("Publishing paused game state")
+				err = pubsub.PublishJSON(perilChan,
+					routing.ExchangePerilDirect,
+					routing.PauseKey,
+					routing.PlayingState{
+						IsPaused: true,
+					})
 				if err != nil {
-					fmt.Printf("Error pausing game: %v\n", err)
+					log.Printf("Could not publish pause: %v\n", err)
 					return
 				}
 			case "resume":
@@ -51,17 +67,14 @@ commandLoop:
 					IsPaused: false,
 				})
 				if err != nil {
-					fmt.Printf("Error pausing game: %v\n", err)
-					return
+					log.Printf("Could not publish resume: %v\n", err)
 				}
 			case "quit":
-				fmt.Println("Goodbye!")
+				log.Println("Goodbye!")
 				break commandLoop
 			default:
-				fmt.Printf("Command %v not understand.", command)
+				fmt.Printf("Command %v not understand.\n", command)
 			}
 		}
 	}
-
-	fmt.Println("Peril Server shutting done.")
 }
